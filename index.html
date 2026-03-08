@@ -67,6 +67,7 @@
       pointer-events: none;
       z-index: 100;
       transform: translate(-50%, -50%);
+      opacity: 0; /* hidden until first real mouse movement */
       transition:
         width       0.35s cubic-bezier(0.22, 1, 0.36, 1),
         height      0.35s cubic-bezier(0.22, 1, 0.36, 1),
@@ -74,6 +75,11 @@
         border-color 0.35s ease,
         opacity     0.2s ease;
       mix-blend-mode: screen;
+    }
+
+    /* Never show custom cursor on touch/mobile devices */
+    @media (hover: none) {
+      #cursor { display: none; }
     }
 
     /* Hover state: hollow ring */
@@ -274,8 +280,9 @@
 
     // ─── Custom cursor tracking ──────────────────
     document.addEventListener('mousemove', e => {
-      cursorEl.style.left = e.clientX + 'px';
-      cursorEl.style.top  = e.clientY + 'px';
+      cursorEl.style.left    = e.clientX + 'px';
+      cursorEl.style.top     = e.clientY + 'px';
+      cursorEl.style.opacity = '1'; /* reveal only after real movement */
     });
     document.addEventListener('mouseleave', () => {
       cursorEl.style.opacity = '0';
