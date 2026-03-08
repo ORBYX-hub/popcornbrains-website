@@ -1,0 +1,23 @@
+# ─── macOS ───────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ─── Node ────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ─── Dev tools (not needed in production) ────
+screenshot.mjs
+serve.mjs
+temporary_screenshots/
+.claude/
+
+# ─── Internal docs ────────────────────────────
+CLAUDE.md
+Herk Programming Information/
+
+# ─── Large unused logo assets ─────────────────
+brand_assets/Logo/Popcorn Brains - Logo.png
+brand_assets/Logo/Popcorn Brains - Logo.jpg
+brand_assets/Logo/Popcorn Brains - Logo.svg

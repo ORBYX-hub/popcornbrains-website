@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Popcorn Brains — Artist Management</title>
+
+  <!-- Favicons -->
+  <link rel="icon" href="brand_assets/Favicons/popcorn_brains_favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="brand_assets/Favicons/popcorn_brains_icon_32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="brand_assets/Favicons/popcorn_brains_icon_16.png">
+  <link rel="apple-touch-icon" href="brand_assets/Favicons/popcorn_brains_icon_512.png">
+
+  <!-- Fonts: Montserrat (brand) + Inter (UI) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+
+  <style>
+    /* ─── Reset ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ─── Tokens ────────────────────────────────── */
+    :root {
+      --bg:       #0d0b09;
+      --fg:       #eeeeee;
+      --primary:  #ffe0c2;
+      --muted:    rgba(238, 238, 238, 0.45);
+    }
+
+    /* ─── Base ──────────────────────────────────── */
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    /* ─── App Shell ─────────────────────────────── */
+    #app {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      cursor: none;
+    }
+
+    /* ─── Canvas ────────────────────────────────── */
+    #canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    /* ─── Custom cursor ─────────────────────────── */
+    #cursor {
+      position: fixed;
+      top: 0; left: 0;
+      width: 8px; height: 8px;
+      background: rgba(255, 224, 194, 0.9);
+      border: 1px solid transparent;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 100;
+      transform: translate(-50%, -50%);
+      transition:
+        width       0.35s cubic-bezier(0.22, 1, 0.36, 1),
+        height      0.35s cubic-bezier(0.22, 1, 0.36, 1),
+        background  0.35s ease,
+        border-color 0.35s ease,
+        opacity     0.2s ease;
+      mix-blend-mode: screen;
+    }
+
+    /* Hover state: hollow ring */
+    #cursor.is-hovering {
+      width: 34px;
+      height: 34px;
+      background: transparent;
+      border-color: rgba(255, 224, 194, 0.55);
+    }
+
+    /* ─── Content Overlay ───────────────────────── */
+    .overlay {
+      position: relative;
+      z-index: 10;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+      pointer-events: none;
+    }
+
+    /* ─── Logo ──────────────────────────────────── */
+    .logo {
+      width: clamp(180px, 22.4vw, 291px);
+      height: auto;
+      /* black PNG → white on dark bg */
+      filter: invert(1);
+      opacity: 0;
+      animation: fadeUp 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards 0.4s;
+      /* subtle text-shadow equivalent for images */
+      drop-shadow: 0 0 40px rgba(255,224,194,0.15);
+    }
+
+    /* ─── Tagline ───────────────────────────────── */
+    .tagline {
+      margin-top: 2.25rem;
+      font-family: 'Inter', sans-serif;
+      font-size: clamp(0.6rem, 1.2vw, 0.72rem);
+      font-weight: 300;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--muted);
+      opacity: 0;
+      animation:
+        fadeUpMuted 1s cubic-bezier(0.22, 1, 0.36, 1) forwards 0.85s,
+        neonPulse   4s ease-in-out infinite 2.4s;
+    }
+
+    /* ─── CTA ───────────────────────────────────── */
+    .cta {
+      display: inline-block;
+      margin-top: 2rem;
+      font-family: 'Inter', sans-serif;
+      font-size: clamp(0.58rem, 1vw, 0.68rem);
+      font-weight: 400;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255, 224, 194, 0.62);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255, 224, 194, 0.22);
+      padding-bottom: 3px;
+      pointer-events: auto;
+      opacity: 0;
+      animation:
+        fadeUpMuted 1s cubic-bezier(0.22, 1, 0.36, 1) forwards 1.15s,
+        neonPulse   4s ease-in-out infinite 2.9s;
+      transition:
+        color        0.25s ease,
+        border-color 0.25s ease;
+    }
+
+    .cta:hover {
+      color: var(--primary);
+      border-color: rgba(255, 224, 194, 0.4);
+    }
+
+    .cta:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 6px;
+      border-radius: 2px;
+    }
+
+    /* Keep native cursor hidden over CTA — ring cursor handles it */
+    .cta { cursor: none; }
+
+    /* ─── Hint ──────────────────────────────────── */
+    .hint {
+      position: absolute;
+      bottom: 2.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.15);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 0;
+      animation: fadeHint 1s ease forwards 2.5s, pulse 5s ease-in-out infinite 3.5s;
+    }
+
+    /* ─── Footer ────────────────────────────────── */
+    footer {
+      position: absolute;
+      bottom: 1.75rem;
+      right: 2rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.58rem;
+      letter-spacing: 0.12em;
+      color: rgba(255, 255, 255, 0.12);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* ─── Animations ────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(28px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeUpMuted {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 0.6; transform: translateY(0); }
+    }
+
+    @keyframes fadeHint {
+      from { opacity: 0; }
+      to   { opacity: 0.15; }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.15; }
+      50%      { opacity: 0.30; }
+    }
+
+    /* Slow, elegant neon pulse — low intensity, premium feel */
+    @keyframes neonPulse {
+      0%, 100% {
+        opacity: 0.44;
+        text-shadow: 0 0 0px rgba(255, 224, 194, 0);
+      }
+      50% {
+        opacity: 0.72;
+        text-shadow:
+          0 0 12px rgba(255, 224, 194, 0.18),
+          0 0 28px rgba(255, 160, 80, 0.08);
+      }
+    }
+
+    /* ─── Mobile adjustments ────────────────────── */
+    @media (max-width: 480px) {
+      .logo { width: clamp(140px, 55vw, 200px); }
+      .tagline { letter-spacing: 0.14em; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cursor"></div>
+
+  <div id="app">
+    <canvas id="canvas"></canvas>
+
+    <div class="overlay">
+      <img
+        class="logo"
+        src="brand_assets/Logo/popcorn_brains_logo_transparent_clean_edges.png"
+        alt="Popcorn Brains"
+      >
+      <p class="tagline">Where Creativity Meets Strategy</p>
+      <a class="cta" href="mailto:lester@popcornbrains.com">lester@popcornbrains.com</a>
+    </div>
+
+    <span class="hint">Move cursor to interact &nbsp;·&nbsp; Click to shift</span>
+    <footer>© 2026 Popcorn Brains</footer>
+  </div>
+
+  <script type="module">
+    // ─── Element refs (declare first) ────────────
+    const cursorEl = document.getElementById('cursor');
+    const canvas   = document.getElementById('canvas');
+    const appEl    = document.getElementById('app');
+
+    // ─── Set canvas pixel dimensions before init ─
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+
+    // ─── Custom cursor tracking ──────────────────
+    document.addEventListener('mousemove', e => {
+      cursorEl.style.left = e.clientX + 'px';
+      cursorEl.style.top  = e.clientY + 'px';
+    });
+    document.addEventListener('mouseleave', () => {
+      cursorEl.style.opacity = '0';
+    });
+    document.addEventListener('mouseenter', () => {
+      cursorEl.style.opacity = '1';
+    });
+
+    // ─── Ring cursor over clickable elements ─────
+    document.querySelectorAll('a, button').forEach(el => {
+      el.addEventListener('mouseenter', () => cursorEl.classList.add('is-hovering'));
+      el.addEventListener('mouseleave', () => cursorEl.classList.remove('is-hovering'));
+    });
+
+    // ─── Brand-aligned warm palettes ────────────
+    const palettes = [
+      // 1. Warm amber / gold — the signature "popcorn" palette
+      {
+        tubes:  ['#ff9040', '#ffcc44', '#ff5c3a'],
+        lights: ['#ff9f1c', '#ffd166', '#e8533a', '#ff7c2a']
+      },
+      // 2. Terracotta / cream — closer to the brand primary #644a40
+      {
+        tubes:  ['#ffe0c2', '#c2714f', '#ffb87a'],
+        lights: ['#ffe0c2', '#ffdfb5', '#c2714f', '#f4a96f']
+      },
+      // 3. Ember glow — deep red-orange, cinematic
+      {
+        tubes:  ['#ff6b35', '#ffd166', '#c1440e'],
+        lights: ['#ff6b35', '#ffcc44', '#c1440e', '#ff8c00']
+      },
+    ];
+
+    let current = 0;
+    let tubesApp = null;
+
+    // ─── Init NeonFlow / TubesCursor ────────────
+    try {
+      const mod = await import(
+        'https://cdn.jsdelivr.net/npm/threejs-components@0.0.19/build/cursors/tubes1.min.js'
+      );
+      const TubesCursor = mod.default;
+
+      tubesApp = TubesCursor(canvas, {
+        tubes: {
+          colors: palettes[0].tubes,
+          lights: {
+            intensity: 200,
+            colors:    palettes[0].lights
+          }
+        }
+      });
+    } catch (err) {
+      console.error('NeonFlow init failed:', err);
+    }
+
+    // ─── Click → cycle palette ───────────────────
+    appEl.addEventListener('click', () => {
+      if (!tubesApp) return;
+      current = (current + 1) % palettes.length;
+      tubesApp.tubes.setColors(palettes[current].tubes);
+      tubesApp.tubes.setLightsColors(palettes[current].lights);
+    });
+  </script>
+</body>
+</html>
