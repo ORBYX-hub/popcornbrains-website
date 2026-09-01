@@ -105,10 +105,12 @@
     spaced(g, (res.win || !res.year || res.year >= 2026)
       ? 'KLOP MIJN SCORE' : 'KAN JIJ VERDER DAN ' + res.year + '?', CX, 1156, 4);
 
-    // footer
+    // footer: leest uit config.js, zodat de kaart na EVENT_UNTIL vanzelf
+    // terugvalt op de tijdloze regel in plaats van een verlopen show te tonen.
     g.fillStyle = '#b8b8b2';
     g.font = '400 34px "' + F + '"';
-    spaced(g, 'STEM OP MEDICINE · VRT ZOMERHIT', CX, 1226, 3);
+    spaced(g, (CFG.eventActive && CFG.eventActive(new Date()))
+      ? CFG.EVENT_LINE : CFG.EVERGREEN_LINE, CX, 1226, 3);
     g.fillStyle = '#6e6e6a';
     g.font = '400 32px "' + F + '"';
     spaced(g, (CFG.SHARE_CARD_HOST || hostFromUrl(CFG.SHARE_URL)).toUpperCase(), CX, 1282, 3);

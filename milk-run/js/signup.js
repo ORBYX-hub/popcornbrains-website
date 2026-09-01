@@ -1,9 +1,14 @@
-// MILK RUN — funnel: splash → inschrijfstap → game → eindscherm → stem-CTA.
-// Inschrijving POST naar het Apps Script-endpoint (backend/RUNBOOK.md).
-// Zonder endpoint: demo-modus, maar ALLEEN op lokale hosts; op een publieke
-// host faalt inschrijven dan luid (geen stille dataverdwijning).
-// Entries gaan eerst in een outbox (localStorage) en worden pas geschrapt als
-// de POST vertrokken is; bij het laden proberen we de outbox opnieuw.
+// MILK RUN, funnel: splash → game → eindscherm.
+//
+// 2026-09-01: de wedstrijd is afgelopen. De inschrijfstap die vóór de game stond
+// is weg, PRESS START start meteen. Wat blijft is een VRIJBLIJVENDE nieuwsbrief-
+// opt-in NA het spelen: nooit een poort, altijd overslaanbaar door ze te negeren.
+//
+// Nieuwsbrief-POST gaat naar het Apps Script-endpoint (backend/RUNBOOK.md).
+// Zonder endpoint: demo-modus, maar ALLEEN op lokale hosts; op een publieke host
+// faalt inschrijven dan luid (geen stille dataverdwijning).
+// Entries gaan eerst in een outbox (localStorage) en worden pas geschrapt als de
+// POST vertrokken is; bij het laden proberen we de outbox opnieuw.
 
 (function () {
   const CFG = window.MILKRUN_CONFIG;
@@ -18,114 +23,174 @@
   // viewer + kopieer-link is er het HOOFDpad, geen fallback (fix 3/7).
   const WEBVIEW = /instagram|fbav|fban|fb_iab|line\/|; wv\)/i.test(navigator.userAgent || '');
 
+  const BEST_KEY = 'milkrun_best';
+
   let lastRes = null;   // laatste eindresultaat (voor de deel-kaart)
   let challenge = 0;    // uitdaging-score uit ?beat= (0 = geen uitdaging)
 
-  const screens = { splash: $('screen-splash'), signup: $('screen-signup'), end: $('screen-end') };
+  const screens = { splash: $('screen-splash'), end: $('screen-end') };
   function show(name) {
     for (const k in screens) screens[k].hidden = (k !== name);
     if (!name) for (const k in screens) screens[k].hidden = true;
   }
 
-  // ---- wedstrijdvenster (reglement §3) --------------------------------------
-  function contestState(now) {
-    const t = (now || new Date()).getTime();
-    if (t < new Date(CFG.ROUND_START).getTime()) return 'voor';
-    if (t > new Date(CFG.FINALE).getTime()) return 'na';
-    return 'open';
+  // ---- opruimen van de campagne (eenmalig, per toestel) ---------------------
+  // Een terugkerende speler mag zijn zomerrecord NIET op 00000 zien springen:
+  // de topscores stonden per stemronde (milkrun_best_r1 .. r8), nu op één sleutel.
+  function migrateLegacy() {
+    if (STORE.get(BEST_KEY) === null) {
+      let best = 0;
+      for (let r = 1; r <= 8; r++) {
+        const v = parseInt(STORE.get('milkrun_best_r' + r) || '0', 10);
+        if (v > best) best = v;
+      }
+      if (best > 0) STORE.set(BEST_KEY, String(best));
+    }
+    for (let r = 1; r <= 8; r++) STORE.remove('milkrun_best_r' + r);
+    // De oude poort-vlag bepaalde of PRESS START naar het formulier ging. Die
+    // stap bestaat niet meer, dus de sleutel is dood gewicht.
+    STORE.remove('milkrun_signup');
   }
 
   // ---- backend --------------------------------------------------------------
+  // Apps Script stuurt `access-control-allow-origin: *` op zowel de 302 als het
+  // uiteindelijke 200-antwoord (geverifieerd 2026-09-01), dus we lezen het antwoord
+  // gewoon uit. Het oude `mode: 'no-cors'` maakte elk antwoord opaque, en daardoor
+  // was elke mislukking onzichtbaar: precies de faalvorm die we nergens willen.
+  // Het content-type blijft form-urlencoded, dus dit blijft een simple request en
+  // er komt geen preflight (Apps Script beantwoordt geen OPTIONS).
   function post(payload) {
     const body = new URLSearchParams(payload).toString();
     return fetch(CFG.ENDPOINT, {
-      method: 'POST', mode: 'no-cors', keepalive: true,
+      method: 'POST', keepalive: true,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body
-    });
+    }).then(r => r.text());
   }
 
-  function outbox() { return JSON.parse(STORE.get('milkrun_outbox') || '[]'); }
+  // Antwoorden van de backend. Het voorvoegsel is essentieel: versie 2 antwoordde
+  // op een onbekend type met een KAAL 'ok'. Zou een geslaagde news-schrijfactie ook
+  // 'ok' zeggen, dan konden we "geschreven" niet onderscheiden van "deze backend
+  // kent type=news niet" en zouden we een adres weggooien dat nooit is aangekomen.
+  const NEWS_OK = ['news-ok', 'news-dup'];   // aangekomen en afgehandeld
+  const NEWS_BAD = 'news-bad';               // geweigerd, opnieuw proberen heeft geen zin
+
+  function dropFromOutbox(payload) {
+    setOutbox(outbox().filter(r => JSON.stringify(r) !== JSON.stringify(payload)));
+  }
+
+  // Levert 'ok' | 'geweigerd' | 'onbereikbaar'. Bij 'onbereikbaar' BLIJFT de rij in
+  // de outbox staan, zodat ze bij een volgend bezoek opnieuw vertrekt.
+  function deliverNews(payload) {
+    return post(payload).then(body => {
+      const t = String(body || '').trim();
+      if (NEWS_OK.indexOf(t) > -1) { dropFromOutbox(payload); return 'ok'; }
+      if (t === NEWS_BAD) { dropFromOutbox(payload); return 'geweigerd'; }
+      return 'onbereikbaar';
+    }).catch(() => 'onbereikbaar');
+  }
+
+  function outbox() {
+    try { return JSON.parse(STORE.get('milkrun_outbox') || '[]'); } catch (e) { return []; }
+  }
   function setOutbox(rows) { STORE.set('milkrun_outbox', JSON.stringify(rows)); }
+
+  const OUTBOX_TTL = 7 * 24 * 3600 * 1000; // een niet-verzonden opt-in vervalt
 
   function flushOutbox() {
     if (!CFG.ENDPOINT) return;
-    const rows = outbox();
-    if (!rows.length) return;
-    setOutbox([]);
-    rows.forEach(row => {
-      post(row).catch(() => setOutbox(outbox().concat([row])));
-    });
+    // Wedstrijd-inschrijvingen die nooit vertrokken zijn, kunnen niet meer winnen
+    // en worden door de backend niet meer aanvaard. Ze stilletjes blijven herposten
+    // is zinloos verkeer; ze wegdoen is eerlijker dan doen alsof ze nog meetellen.
+    // Een oude nieuwsbrief-rij vervalt ook: een adres eindeloos bewaren omdat één
+    // POST ooit faalde, is geen bewaartermijn maar een lek.
+    const now = Date.now();
+    const rows = outbox().filter(r => r && r.type === 'news' &&
+      (!r.at || (now - new Date(r.at).getTime()) < OUTBOX_TTL));
+    // Alleen de vervallen/legacy rijen meteen weggooien. De rest blijft staan tot
+    // haar eigen POST vertrokken is, zoals de kop van dit bestand belooft: wist je
+    // ze vooraf, dan is de rij weg zodra iemand de tab sluit vóór de fetch settelt.
+    setOutbox(rows);
+    rows.forEach(row => { deliverNews(row); });
   }
 
   function send(payload) {
-    payload.week = CFG.votingRound(new Date());
     if (!CFG.ENDPOINT) {
       if (LOCAL) { // demo-modus voor lokale tests
         const rows = JSON.parse(STORE.get('milkrun_demo_rows') || '[]');
         rows.push(Object.assign({ at: new Date().toISOString() }, payload));
         STORE.set('milkrun_demo_rows', JSON.stringify(rows));
-        return Promise.resolve();
+        return Promise.resolve('ok');
       }
-      return payload.type === 'entry' ? Promise.reject(new Error('geen endpoint')) : Promise.resolve();
+      return Promise.resolve(payload.type === 'news' ? 'onbereikbaar' : 'ok');
     }
-    if (payload.type === 'entry') {
-      // outbox-first: bij netwerkfalen blijft de rij staan en proberen we later
+    if (payload.type === 'news') {
+      // outbox-first: de rij staat op schijf VOOR ze vertrekt, en verdwijnt pas
+      // als de backend bevestigt dat ze aangekomen is.
       setOutbox(outbox().concat([payload]));
-      return post(payload).then(() => {
-        setOutbox(outbox().filter(r => JSON.stringify(r) !== JSON.stringify(payload)));
-      }).catch(() => {});
+      return deliverNews(payload);
     }
     return post(payload).catch(() => {});
   }
   const ping = type => send({ type });
 
-  // ---- inschrijfstap -------------------------------------------------------
-  const form = $('signup-form');
-  const status = () => STORE.get('milkrun_signup') || '';
+  // ---- nieuwsbrief ----------------------------------------------------------
+  const newsForm = $('news-form');
+  const NEWS_KEY = 'milkrun_news';
 
-  function handleSignup(f, doneEl) {
-    const firstname = f.querySelector('[name=firstname]').value.trim();
-    const lastname = f.querySelector('[name=lastname]').value.trim();
+  // Toont de eindstand ipv het formulier. Zonder dit krijgt iemand die al
+  // ingeschreven is bij ELKE volgende run opnieuw een leeg formulier voorgeschoteld,
+  // en de backend appendt onvoorwaardelijk, dus dat levert dubbele rijen op.
+  function markNewsDone() {
+    const done = $('news-done');
+    if (done) done.hidden = false;
+    if (newsForm) newsForm.hidden = true;
+  }
+
+  function handleNews(f, doneEl) {
     const email = f.querySelector('[name=email]').value.trim();
-    const guess = f.querySelector('[name=guess]').value.trim();
-    const kennisEl = f.querySelector('[name=kennis]:checked');
-    const kennis = kennisEl ? kennisEl.value : '';
-    const rules = f.querySelector('[name=rules]').checked;
     const optinRegoli = f.querySelector('[name=optin_regoli]').checked;
     const optinSony = f.querySelector('[name=optin_sony]').checked;
     const trap = f.querySelector('[name=website]').value; // honeypot
     const err = f.querySelector('.form-error');
     err.textContent = '';
-    if (trap) return true; // bot: doe alsof alles OK is
-    const state = contestState();
-    if (state === 'voor') { err.textContent = 'DE WEDSTRIJD START OP MA 6 JULI OM 12:00.'; return false; }
-    if (state === 'na') { err.textContent = 'DE WEDSTRIJD IS AFGELOPEN.'; return false; }
-    if (!firstname || !lastname) { err.textContent = 'VUL JE VOOR- EN ACHTERNAAM IN.'; return false; }
+    // Bot: naar buiten toe niet te onderscheiden van een geslaagde inschrijving,
+    // maar de demper laat wel een spoor na (een demper die stil iets opeet is
+    // precies de faalvorm die we nergens willen).
+    if (trap) { ping('hp'); if (doneEl) markNewsDone(); return true; }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { err.textContent = 'VUL EEN GELDIG E-MAILADRES IN.'; return false; }
-    if (!/^\d{1,9}$/.test(guess)) { err.textContent = 'DE SCHIFTINGSVRAAG VRAAGT EEN GETAL.'; return false; }
-    if (!kennis) { err.textContent = 'BEANTWOORD DE KENNISVRAAG OM MEE TE DINGEN.'; return false; }
-    if (kennis !== 'medicine') { err.textContent = 'DAT IS NIET DE NIEUWSTE SINGLE. TIP: JE STEMT ER STRAKS VOOR.'; return false; }
-    if (!rules) { err.textContent = 'AKKOORD MET HET REGLEMENT IS NODIG OM MEE TE DINGEN.'; return false; }
+    // Zonder aangevinkte toestemming is er geen enkele grond om dit adres te
+    // bewaren, dus dan slaan we het ook niet op (AVG art. 6.1.a).
+    if (!optinRegoli && !optinSony) { err.textContent = 'VINK AAN WAAROVER JE NIEUWS WIL ONTVANGEN.'; return false; }
     if (!CFG.ENDPOINT && !LOCAL) { err.textContent = 'INSCHRIJVEN KAN EVEN NIET. SPELEN WEL!'; return false; }
+    // Pas iets beweren als de backend bevestigd heeft dat de rij aangekomen is.
+    // Zolang dat niet zo is, blijft het formulier staan en blijft de rij in de
+    // outbox, zodat ze bij een volgend bezoek alsnog vertrekt.
+    const knop = f.querySelector('button[type=submit]');
+    const knopLabel = knop ? knop.textContent : '';
+    if (knop) { knop.disabled = true; knop.textContent = 'BEZIG...'; }
     send({
-      type: 'entry', firstname, lastname, email, guess, kennis,
+      type: 'news', email, at: new Date().toISOString(),
       optin_regoli: optinRegoli ? 'ja' : 'nee',
-      optin_sony: optinSony ? 'ja' : 'nee',
-      // legacy-veld: houdt een nog-niet-geredeploye backend een opt-in-signaal
-      // zodat er in het overgangsvenster geen toestemming verloren gaat
-      newsletter: (optinRegoli || optinSony) ? 'ja' : 'nee'
+      optin_sony: optinSony ? 'ja' : 'nee'
+    }).then(uitkomst => {
+      if (knop) { knop.disabled = false; knop.textContent = knopLabel; }
+      if (uitkomst === 'ok') {
+        STORE.set(NEWS_KEY, 'done');
+        if (doneEl) markNewsDone();
+        return;
+      }
+      err.textContent = uitkomst === 'geweigerd'
+        ? 'DIT ADRES WERD NIET AANVAARD. CONTROLEER HET.'
+        : 'INSCHRIJVEN LUKT EVEN NIET. WE PROBEREN HET STRAKS OPNIEUW.';
     });
-    STORE.set('milkrun_signup', 'done');
-    if (doneEl) { doneEl.hidden = false; f.hidden = true; }
     return true;
   }
 
   // ---- game-koppeling ------------------------------------------------------
   function startGame() {
     // Elke start is een user gesture: ontgrendel/hervat audio hier, zodat ook
-    // de EERSTE run (via formulier-submit of skip, zonder PRESS START-unlock in
-    // dezelfde gesture) muziek heeft. Fix "muziek start niet bij eerste run".
+    // de EERSTE run muziek heeft.
     AUD.unlock();
     show(null);
     $('share-view').hidden = true;
@@ -148,23 +213,9 @@
           ? 'JE VLOOG ' + (res.year - 1996) + ' JAAR VER · TOT ' + res.year
           : 'GESTRAND BIJ DE START · DE KOE WIL NOG EENS');
     $('end-score').textContent = fmtScore(res.score);
-    const round = CFG.votingRound(new Date());
-    const key = 'milkrun_best_r' + round;
-    const best = Math.max(res.score, parseInt(STORE.get(key) || '0', 10));
-    STORE.set(key, String(best));
-    $('end-best').textContent = 'BESTE DEZE STEMRONDE: ' + fmtScore(best);
-
-    // stem-CTA of ticketfallback zolang de nominatie er niet is
-    const cta = $('cta-vote');
-    if (CFG.VOTE_URL) {
-      cta.href = CFG.VOTE_URL + (CFG.VOTE_URL.indexOf('?') > -1 ? '&' : '?') + CFG.UTM;
-      cta.textContent = 'STEM NU OP MEDICINE';
-      $('cta-note').textContent = 'VRT ZOMERHIT · ELKE WEEK OPNIEUW STEMMEN';
-    } else {
-      cta.href = CFG.TICKETS_URL;
-      cta.textContent = 'TICKETS FOREVER · 23+24 OKT';
-      $('cta-note').textContent = 'STEMMEN OP MEDICINE KAN VANAF MA 6 JULI 12:00';
-    }
+    const best = Math.max(res.score, parseInt(STORE.get(BEST_KEY) || '0', 10));
+    STORE.set(BEST_KEY, String(best));
+    $('end-best').textContent = 'BESTE SCORE: ' + fmtScore(best);
 
     // uitdaging (deep-link ?beat=): vier winst of toon het te kloppen doel
     const ch = $('end-challenge');
@@ -180,33 +231,38 @@
       }
     }
 
-    $('second-chance').hidden = status() === 'done' || contestState() !== 'open';
     show('end');
   }
 
+  // ---- de show op het eindscherm -------------------------------------------
+  // Leest ALLES uit config.js. Na EVENT_UNTIL valt de ticketknop vanzelf weg en
+  // blijft de tijdloze regel staan, zodat dit scherm niet opnieuw veroudert.
+  function paintEvent() {
+    const tix = $('cta-tickets'), line = $('event-line'), meta = $('event-meta');
+    if (CFG.EVENT_URL && CFG.eventActive(new Date())) {
+      tix.href = CFG.EVENT_URL;
+      tix.hidden = false;
+      line.textContent = CFG.EVENT_LINE;
+      meta.textContent = CFG.EVENT_META;
+      meta.hidden = false;
+    } else {
+      tix.hidden = true;
+      line.textContent = CFG.EVERGREEN_LINE;
+      meta.textContent = '';
+      meta.hidden = true;
+    }
+  }
+
   // ---- events --------------------------------------------------------------
-  $('btn-start').addEventListener('click', () => {
-    AUD.unlock();
-    if (status()) startGame(); else show('signup');
-  });
+  $('btn-start').addEventListener('click', () => { AUD.unlock(); startGame(); });
 
-  form.addEventListener('submit', e => {
+  newsForm.addEventListener('submit', e => {
     e.preventDefault();
-    if (handleSignup(form)) startGame();
-  });
-  $('btn-skip').addEventListener('click', () => {
-    STORE.set('milkrun_signup', 'skipped');
-    startGame();
-  });
-
-  const form2 = $('signup-form-2');
-  form2.addEventListener('submit', e => {
-    e.preventDefault();
-    handleSignup(form2, $('second-done'));
+    handleNews(newsForm, $('news-done'));
   });
 
   $('btn-replay').addEventListener('click', () => { AUD.unlock(); startGame(); });
-  $('cta-vote').addEventListener('click', () => ping('cta'));
+  $('cta-tickets').addEventListener('click', () => ping('tickets'));
 
   // Deel-knop: succes alleen claimen als het kopiëren echt lukte.
   const shareBtn = $('btn-share');
@@ -245,8 +301,6 @@
     return u + (u.indexOf('?') > -1 ? '&' : '?') + 'beat=' + score;
   }
   // Vergelijkende share (fix 3/7, de Wordle-les): een vraag lokt een antwoord uit.
-  // De stem-CTA staat NIET meer in de tekst, die draagt de deel-kaart al
-  // (STEM OP MEDICINE · VRT ZOMERHIT). De tekst is puur brag + uitdaging.
   function shareText(res) {
     const url = shareUrlWith(res.score);
     if (res.win) {
@@ -395,6 +449,9 @@
     const el = $('challenge');
     if (challenge && el) { el.textContent = 'JE BENT UITGEDAAGD · KLOP ' + fmtScore(challenge); el.hidden = false; }
   })();
+  migrateLegacy();
+  if (STORE.get(NEWS_KEY) === 'done') markNewsDone();
+  paintEvent();
   flushOutbox();
   show('splash');
 })();

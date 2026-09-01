@@ -1,20 +1,25 @@
 // MILK RUN — centrale configuratie.
-// Alles wat op ma 6/7 (of later) moet wisselen, wisselt HIER, nergens anders.
+// Alles wat ooit moet wisselen, wisselt HIER, nergens anders.
+//
+// 2026-09-01: de Zomerhit-campagne en de wedstrijd zijn afgelopen (finale 29/8;
+// Milk Inc. haalde de finale niet). De game blijft als tijdloos Milk Inc.-spel.
+// Alle campagnevelden (VOTE_URL, UTM, ROUND_*, FINALE, votingRound) zijn weg.
 
 window.MILKRUN_CONFIG = {
-  // De VRT Zomerhit-stempagina. Op vraag van Lester (2/7) alvast live gezet
-  // alsof de stemming loopt; ma 6/7 checken of dit de definitieve link blijft.
-  VOTE_URL: 'https://www.vrt.be/interactie/stem/zomerhit/',
-
-  // Google Apps Script web-app URL (backend/RUNBOOK.md). Gekoppeld 7/7/2026:
-  // inschrijvingen gaan naar de private Sheet "MILK RUN - inschrijvingen".
+  // Google Apps Script web-app URL (backend/RUNBOOK.md). Draagt nu enkel nog
+  // de anonieme tellers + de vrijblijvende nieuwsbrief-opt-in.
   ENDPOINT: 'https://script.google.com/macros/s/AKfycbyaKckaXBJ1leG_FAiK8v0XxB0w03-4h8wqKFaaquwR-EegiwJc0p3s9xssdY02Kv61og/exec',
 
-  // Ticketfallback zolang VOTE_URL leeg is.
-  TICKETS_URL: 'https://www.afas-dome.be/nl/evenement/milk-inc-4fceea50',
-
-  // UTM zodat kliks vanuit de game meetbaar zijn aan VRT-zijde.
-  UTM: 'utm_source=milkrun&utm_medium=game&utm_campaign=zomerhit2026',
+  // ---- de show, ÉÉN keer gedefinieerd -------------------------------------
+  // De les van de campagne: "23+24 OKT" stond op zeven plaatsen hard gecodeerd,
+  // dus elke wijziging was een jacht door acht bestanden. Splash, eindscherm en
+  // score-kaart lezen nu allemaal HIER. Na EVENT_UNTIL valt alles automatisch
+  // terug op EVERGREEN_LINE en verdwijnt de ticketknop. Eén datum, één bestand.
+  EVENT_LINE: 'MILK INC. FOREVER · AFAS DOME',
+  EVENT_META: '23 + 24 OKT 2026',
+  EVENT_URL: 'https://www.afas-dome.be/nl/evenement/milk-inc-4fceea50',
+  EVENT_UNTIL: '2026-10-25T00:00:00+02:00',
+  EVERGREEN_LINE: 'MILK INC. · 1996 → 2026',
 
   // Het 2014-eerbetoon ("HET WERD STIL") staat UIT tot Regi & Linda hun zegen
   // geven; de veilige versie is een puur muzikale pauze zonder tekst.
@@ -25,12 +30,6 @@ window.MILKRUN_CONFIG = {
   // De 2014-stilte dimt ze, The Return brengt ze terug.
   SOUNDTRACK: 'assets/audio/milk-run.m4a',
   SOUNDTRACK_OFFSET: 0,
-
-  // Stemrondes (VRT-reglement 2026): ronde 1 start ma 6/7, eindigt za 11/7
-  // 23:58, daarna wekelijks tot de finale za 29/8. Weekly best-score reset.
-  ROUND_START: '2026-07-06T12:00:00+02:00',
-  ROUND_1_END: '2026-07-11T23:58:00+02:00',
-  FINALE: '2026-08-29T20:00:00+02:00',
 
   SHARE_URL: 'https://popcornbrains.com/milk-run/',
 
@@ -51,12 +50,10 @@ window.MILKRUN_STORE = (function () {
   };
 })();
 
-window.MILKRUN_CONFIG.votingRound = function (now) {
-  const t = (now || new Date()).getTime();
-  const start = new Date(this.ROUND_START).getTime();
-  if (t < start) return 0; // preview, stemmen nog niet open
-  const r1end = new Date(this.ROUND_1_END).getTime();
-  if (t <= r1end) return 1;
-  const week = 7 * 24 * 3600 * 1000;
-  return Math.min(8, 2 + Math.floor((t - r1end) / week));
+// Loopt de show nog? Faalt de datum ooit te parsen, dan behandelen we hem als
+// voorbij: liever de tijdloze regel dan een dode ticketknop.
+window.MILKRUN_CONFIG.eventActive = function (now) {
+  const until = new Date(this.EVENT_UNTIL).getTime();
+  if (!isFinite(until)) return false;
+  return (now || new Date()).getTime() < until;
 };

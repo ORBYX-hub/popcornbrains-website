@@ -209,12 +209,14 @@
       { id: 'unstoppable', density: 0.65, speed: 48, backdrop: 'finale', fx: 'pills', songs: [
         { n: 'UNSTOPPABLE',       y: 2025, d: 6 } ] },
       { id: 'medicine',   density: 0.60, speed: 52, backdrop: 'finale', fx: 'pills', songs: [
-        // Finale = de prestatie: Medicine, voor het eerst genomineerd voor de
-        // Zomerhit. Twee banner-beats (duidelijk over Medicine) + grijpbare
-        // ster-bonussen (de "fan-bonus" op het einde). Feitcheck 2/7: "eerste"
-        // verdedigbaar, "ooit" niet 100% (geen publieke nominatielijst < 2016).
-        { n: 'MEDICINE',          y: 2026, d: 6, b: 'MEDICINE · GENOMINEERD', bonus: true, m: 'spark', hero: true },
-        { n: 'MEDICINE',          y: 2026, d: 5, b: 'VOOR HET EERST IN DE ZOMERHIT', bonus: true, m: 'hearts', hero: true } ] }
+        // Finale = waar de band NU staat: Medicine, 2026, en het loopt door.
+        // Twee banner-beats (duidelijk over Medicine) + grijpbare ster-bonussen
+        // (de "fan-bonus" op het einde).
+        // 2026-09-01: de Zomerhit-tekst is hier weg. Milk Inc. haalde de finale
+        // niet (Lester, 1/9), en de game hangt sowieso niet meer aan die campagne.
+        // Wat overblijft is tijdloos en verjaart dus niet opnieuw.
+        { n: 'MEDICINE',          y: 2026, d: 6, b: 'MEDICINE · 2026', bonus: true, m: 'spark', hero: true },
+        { n: 'MEDICINE',          y: 2026, d: 5, b: 'EN HET GAAT DOOR', bonus: true, m: 'hearts', hero: true } ] }
     ],
     draw(g, era, t, p) { BACKDROPS[era.backdrop](g, t, p); },
     total() { return this.list.reduce((s, e) => s + e.dur, 0); }
