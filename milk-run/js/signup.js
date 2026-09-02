@@ -53,18 +53,30 @@
   }
 
   // ---- backend --------------------------------------------------------------
-  // Apps Script stuurt `access-control-allow-origin: *` op zowel de 302 als het
-  // uiteindelijke 200-antwoord (geverifieerd 2026-09-01), dus we lezen het antwoord
-  // gewoon uit. Het oude `mode: 'no-cors'` maakte elk antwoord opaque, en daardoor
-  // was elke mislukking onzichtbaar: precies de faalvorm die we nergens willen.
-  // Het content-type blijft form-urlencoded, dus dit blijft een simple request en
-  // er komt geen preflight (Apps Script beantwoordt geen OPTIONS).
+  function encode(payload) { return new URLSearchParams(payload).toString(); }
+
+  // TELLERS: fire-and-forget. Het antwoord doet er niet toe, dus blijft dit op
+  // `no-cors` zoals altijd. Apps Script antwoordt met een 302 naar een eenmalige
+  // googleusercontent-echo-URL die soms 404 geeft; dat is onschuldig (doPost is
+  // dan al uitgevoerd en de teller staat al hoger) maar het zou wel een console-
+  // error opleveren, en deze build houdt de console op nul.
   function post(payload) {
-    const body = new URLSearchParams(payload).toString();
     return fetch(CFG.ENDPOINT, {
-      method: 'POST', keepalive: true,
+      method: 'POST', mode: 'no-cors', keepalive: true,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
+      body: encode(payload)
+    });
+  }
+
+  // NIEUWSBRIEF: hier IS het antwoord de bevestiging. Apps Script stuurt
+  // `access-control-allow-origin: *` op zowel de 302 als de finale 200
+  // (geverifieerd 2026-09-01), dus dit is leesbaar. Geen `keepalive`: die combineert
+  // slecht met een redirect, en we wachten hier toch op het antwoord.
+  function postAndRead(payload) {
+    return fetch(CFG.ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: encode(payload)
     }).then(r => r.text());
   }
 
@@ -82,7 +94,7 @@
   // Levert 'ok' | 'geweigerd' | 'onbereikbaar'. Bij 'onbereikbaar' BLIJFT de rij in
   // de outbox staan, zodat ze bij een volgend bezoek opnieuw vertrekt.
   function deliverNews(payload) {
-    return post(payload).then(body => {
+    return postAndRead(payload).then(body => {
       const t = String(body || '').trim();
       if (NEWS_OK.indexOf(t) > -1) { dropFromOutbox(payload); return 'ok'; }
       if (t === NEWS_BAD) { dropFromOutbox(payload); return 'geweigerd'; }
@@ -194,6 +206,10 @@
     AUD.unlock();
     show(null);
     $('share-view').hidden = true;
+    // Pagina op slot + terug naar boven: tijdens het spelen mag er niets onder de
+    // game staan en mag een tik de pagina niet verschuiven (zie css body.playing).
+    document.body.classList.add('playing');
+    window.scrollTo(0, 0);
     ping('play');
     window.MILKRUN_GAME.start();
   }
@@ -201,6 +217,7 @@
   function fmtScore(n) { return String(n).padStart(5, '0'); }
 
   function onEnd(res) {
+    document.body.classList.remove('playing');
     lastRes = res;
     ping(res.win ? 'win' : 'over');
     $('end-title').textContent = res.win ? 'U WIN' : 'GAME OVER';
